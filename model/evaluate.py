@@ -20,6 +20,8 @@ from sklearn.metrics import (
     average_precision_score,
     ConfusionMatrixDisplay,
     f1_score,
+    roc_curve,
+    precision_recall_curve,
 )
 
 from network import TumorClassifier
@@ -45,7 +47,7 @@ def full_evaluation(
     X_test:     np.ndarray,
     y_test:     np.ndarray,
     km=None,                   # fitted KMeans (for center overlay)
-    output_dir: str = "outputs",
+    output_dir: str = "aml-final",
 ):
     os.makedirs(output_dir, exist_ok=True)
     device = next(model.parameters()).device
@@ -62,6 +64,7 @@ def full_evaluation(
     _confusion_matrix(te_preds, y_test, output_dir)
     _decision_boundary(model, X_train, y_train, X_test, y_test, km, device, output_dir)
     _overfitting_summary(tr_preds, tr_probs, y_train, te_preds, te_probs, y_test)
+    _roc_pr_curves(tr_probs, y_train, te_probs, y_test, output_dir)
 
 
 def _classification_report(preds, labels):
@@ -92,9 +95,8 @@ def _confusion_matrix(preds, labels, output_dir):
         display_labels=["C1 rim", "C2 immune"],
         ax=ax, colorbar=False,
     )
-    ax.set_title("Confusion Matrix (test set)")
     plt.tight_layout()
-    path = os.path.join(output_dir, "confusion_matrix.png")
+    path = os.path.join(output_dir, "fig3_confusion_matrix.png")
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"\nConfusion matrix saved → {path}")
@@ -127,10 +129,10 @@ def _decision_boundary(model, X_train, y_train, X_test, y_test, km, device, outp
 
         mask0 = y_pts == 0
         ax.scatter(X_pts[mask0, 0], X_pts[mask0, 1],
-                   c="mediumpurple", s=18, alpha=0.85,
+                   c="#c0392b", s=20, alpha=0.85,
                    edgecolors="white", linewidths=0.3, label="C1 (tumour rim)")
         ax.scatter(X_pts[~mask0, 0], X_pts[~mask0, 1],
-                   c="orange", s=8, alpha=0.45,
+                   c="#2980b9", s=8, alpha=0.45,
                    edgecolors="none", label="C2 (immune ring)")
 
         if km is not None:
@@ -138,13 +140,12 @@ def _decision_boundary(model, X_train, y_train, X_test, y_test, km, device, outp
                        marker="x", s=60, c="white", linewidths=1.5,
                        label="k-means centers")
 
-        ax.set_title(f"Decision boundary — {title}")
         ax.legend(fontsize=8, framealpha=0.7)
         ax.set_xlabel("x₁ (scaled)")
         ax.set_ylabel("x₂ (scaled)")
 
     plt.tight_layout()
-    path = os.path.join(output_dir, "decision_boundary.png")
+    path = os.path.join(output_dir, "fig4_decision_boundary.png")
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"Decision boundary saved → {path}")
@@ -187,13 +188,51 @@ def _overfitting_summary(tr_preds, tr_probs, y_train, te_preds, te_probs, y_test
         print("  Verdict: no significant overfitting detected (all gaps ≤ 0.05).")
 
 
+def _roc_pr_curves(tr_probs, y_train, te_probs, y_test, output_dir):
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    for probs, labels, tag, ls, lw in [
+        (tr_probs, y_train, "Train", "-",  2.0),
+        (te_probs, y_test,  "Test",  "--", 2.0),
+    ]:
+        fpr, tpr, _  = roc_curve(labels, probs)
+        prec, rec, _ = precision_recall_curve(labels, probs)
+        auc_roc = roc_auc_score(labels, probs)
+        auc_pr  = average_precision_score(labels, probs)
+
+        axes[0].plot(fpr, tpr, linestyle=ls, linewidth=lw,
+                     label=f"{tag} (AUC = {auc_roc:.4f})")
+        axes[1].plot(rec, prec, linestyle=ls, linewidth=lw,
+                     label=f"{tag} (AP = {auc_pr:.4f})")
+
+    axes[0].plot([0, 1], [0, 1], "k:", linewidth=1)
+    axes[0].set_xlabel("False Positive Rate")
+    axes[0].set_ylabel("True Positive Rate")
+    axes[0].legend(fontsize=9)
+    axes[0].grid(alpha=0.3)
+
+    baseline_pr = (y_test == 1).mean()
+    axes[1].axhline(baseline_pr, color="k", linestyle=":", linewidth=1,
+                    label=f"Baseline (prevalence = {baseline_pr:.2f})")
+    axes[1].set_xlabel("Recall")
+    axes[1].set_ylabel("Precision")
+    axes[1].legend(fontsize=9)
+    axes[1].grid(alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(output_dir, "fig6_roc_pr.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"ROC / PR curves saved → {path}")
+
+
 # ── complexity sweep (called separately from run.py) ─────────────────────────
 
 def complexity_sweep(
     X_train, y_train, X_val, y_val,
     center_grid: list[int],
     train_fn,          # callable matching train.train signature
-    output_dir: str = "outputs",
+    output_dir: str = "aml-final",
 ):
     """
     Train with different numbers of RBF centers and plot train vs val F1.
@@ -221,11 +260,10 @@ def complexity_sweep(
     ax.plot(center_grid, va_f1s, "s--", label="Val macro-F1")
     ax.set_xlabel("Number of RBF centers (k)")
     ax.set_ylabel("Macro F1")
-    ax.set_title("Complexity sweep — RBF centers vs generalisation")
     ax.legend()
     ax.grid(alpha=0.3)
     plt.tight_layout()
-    path = os.path.join(output_dir, "complexity_sweep.png")
+    path = os.path.join(output_dir, "fig5_complexity_sweep.png")
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"\nComplexity sweep saved → {path}")

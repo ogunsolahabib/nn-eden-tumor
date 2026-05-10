@@ -4,7 +4,7 @@ Training loop with:
   - class-weighted BCE loss for the 1:4 imbalance
   - per-epoch train/val loss and macro-F1 recording
   - early stopping on val macro-F1 with best-weight restore
-  - learning curve saved to outputs/learning_curves.png
+  - learning curve saved to aml-final/fig2_learning_curves.png
 """
 
 import copy
@@ -75,7 +75,7 @@ def train(
     dropout:      float = 0.3,
     patience:     int   = 30,   # early-stopping patience (val macro-F1)
     seed:         int   = 42,
-    output_dir:   str   = "outputs",
+    output_dir:   str   = "aml-final",
 ) -> tuple[TumorClassifier, dict]:
 
     os.makedirs(output_dir, exist_ok=True)
@@ -190,7 +190,6 @@ def _plot_learning_curves(history: dict, warmup_epochs: int, output_dir: str):
                    label=f"Centers unfrozen (ep {warmup_epochs})")
         ax.set_xlabel("Epoch")
         ax.set_ylabel(ylabel)
-        ax.set_title(f"{ylabel} — Learning Curve")
         ax.legend()
         ax.grid(alpha=0.3)
 
@@ -204,7 +203,7 @@ def _plot_learning_curves(history: dict, warmup_epochs: int, output_dir: str):
     axes[0].legend()
 
     plt.tight_layout()
-    path = os.path.join(output_dir, "learning_curves.png")
+    path = os.path.join(output_dir, "fig2_learning_curves.png")
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"Learning curves saved → {path}")

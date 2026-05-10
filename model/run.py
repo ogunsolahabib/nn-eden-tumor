@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from train import train
 from evaluate import full_evaluation, complexity_sweep
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "aml-final")
 DATA_PATH  = os.path.join(os.path.dirname(__file__), "..", "data-generation", "tumor_dataset.csv")
 
 
