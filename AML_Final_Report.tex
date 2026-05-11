@@ -35,10 +35,14 @@ A biologically-inspired synthetic dataset is constructed in which samples from
 the minority class (C1) form an anisotropic ring enclosed by the majority
 class (C2), deliberately avoiding concentric-circle geometry.
 A radial basis function (RBF) network whose centers are seeded by k-means is
-trained on this dataset.  I justify a two-layer post-RBF architecture,
-demonstrate that the network achieves a test ROC-AUC of 0.9934 and
-macro-F1 of 0.8949 with negligible train--test gap, and provide a complexity
-sweep showing that validation performance plateaus at $k{=}10$ RBF centers.
+trained on this dataset.
+The post-RBF stack is parameterised by \texttt{hidden\_dims}, enabling a
+controlled architecture ablation over shallow (no hidden layers), one-layer,
+and two-layer configurations.
+The ablation reveals that a single hidden layer \texttt{(32,)} maximises
+test macro-F1 at 0.9407 and ROC-AUC at 0.9973 with the smallest
+train--test gap, while a complexity sweep confirms that validation
+performance plateaus at $k{=}10$ RBF centers.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -147,14 +151,16 @@ at the mean nearest-neighbor distance, giving overlapping but non-redundant
 receptive fields.
 
 \subsection{Post-RBF Layers and Architectural Justification}
-A single linear layer after the RBF units would implement a weighted sum
-of Gaussians---equivalent to a shallow RBF network.  While this can
-approximate any continuous function in the limit \cite{park1991universal},
-it requires a large number of centers to represent the enclosed geometry
-efficiently, because each Gaussian decays isotropically and cannot adapt
-its effective support shape.
+A single linear output applied directly to the RBF activations---a
+classic shallow RBF network---implements a weighted sum of Gaussians.
+While this is a universal approximator in the limit \cite{park1991universal},
+it cannot efficiently represent the enclosed geometry at a constrained
+center count of $k{=}20$, because each Gaussian decays isotropically and
+no linear combination can produce a closed, non-convex decision contour.
 
-Two fully-connected layers after the RBF units address this:
+The post-RBF stack is therefore parameterised by a \texttt{hidden\_dims}
+tuple that controls both depth and width.  Three configurations are compared
+in Section~\ref{sec:ablation}; the two-layer default is:
 \begin{enumerate}
   \item \textbf{Layer 1} [\texttt{Linear(20$\to$32) + BN + ReLU + Dropout(0.3)}]
         learns nonlinear combinations of RBF responses.
@@ -163,22 +169,24 @@ Two fully-connected layers after the RBF units address this:
         Batch normalisation stabilises training because RBF outputs lie in
         $(0,1]$ but vary sharply across the input space.
   \item \textbf{Layer 2} [\texttt{Linear(32$\to$16) + ReLU}]
-        composes the contrasts learned in Layer 1 into higher-order features.
-        The enclosed topology requires the decision boundary to curve
+        composes the contrasts from Layer~1 into higher-order features.
+        The enclosed topology requires the boundary to curve
         \emph{inward} (separating C1 from the necrotic interior) and
-        \emph{outward} (separating C1 from C2) simultaneously.
-        Universal approximation guarantees require depth for non-convex
-        boundaries of this type when the number of basis functions is
-        constrained \cite{cybenko1989approximation}.
+        \emph{outward} (separating C1 from C2) simultaneously---a task
+        that requires depth when the basis count is constrained
+        \cite{cybenko1989approximation}.
 \end{enumerate}
-The output is a single linear unit (\texttt{Linear(16$\to$1)}) producing
-a log-odds score; a sigmoid maps this to a probability.
-The full forward pass is
+The output is a single linear unit (\texttt{Linear($d_{\text{last}}$$\to$1)})
+producing a log-odds score.
+For the two-layer default the full forward pass is
 \[
   f(\mathbf{x}) = \mathbf{W}_3\,\mathrm{ReLU}\!\bigl(\mathbf{W}_2\,
   \mathrm{ReLU}\!\bigl(\mathrm{BN}(\mathbf{W}_1\boldsymbol{\varphi}(\mathbf{x}))\bigr)\bigr),
 \]
 where $\boldsymbol{\varphi}(\mathbf{x}) = [\varphi_1,\ldots,\varphi_{20}]^\top$.
+BN and Dropout are applied only after the first hidden layer regardless of
+depth; the ablation in Section~\ref{sec:ablation} determines which depth
+generalises best.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Training Procedure}
@@ -386,6 +394,67 @@ interpretable decision boundary and provides redundancy against
 center drift during fine-tuning.
 
 % ─────────────────────────────────────────────────────────────────────────────
+\section{Architecture Ablation}
+\label{sec:ablation}
+
+To determine how much of the performance is attributable to post-RBF depth,
+three \texttt{hidden\_dims} configurations are trained independently at
+$k{=}20$ centers under identical hyperparameters (same seed, optimizer,
+regularisation, and early-stopping patience).
+
+\begin{table}[H]
+  \centering
+  \caption{Architecture ablation at $k{=}20$.  All gaps are train$-$test.}
+  \label{tab:ablation}
+  \begin{tabular}{lrrccccc}
+    \toprule
+    Config & Params & Epochs & Val F1 & Test F1 & ROC-AUC & PR-AUC & Gap F1 \\
+    \midrule
+    Shallow \texttt{()} & 81 & 159 & 0.9233 & 0.8456 & 0.9867 & 0.9965 & +0.024 \\
+    1-layer \texttt{(32,)} & 829 & 42 & \textbf{0.9847} & \textbf{0.9407} & \textbf{0.9973} & \textbf{0.9993} & +0.021 \\
+    2-layer \texttt{(32,16)} & 1341 & 39 & \textbf{0.9847} & 0.8949 & 0.9934 & 0.9984 & +0.037 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\columnwidth]{fig7_ablation}
+  \caption{Left: test macro-F1 and ROC-AUC per configuration.
+           Right: validation macro-F1 learning curves; the shallow
+           baseline converges 4$\times$ slower and plateaus well below
+           the two deeper variants.}
+  \label{fig:ablation}
+\end{figure}
+
+Three findings stand out.
+First, the shallow RBF (\texttt{hidden\_dims}$=$\texttt{()}) is clearly
+insufficient: its test macro-F1 of 0.8456 and validation F1 of 0.9233
+confirm that 20 linearly-combined Gaussians cannot reliably close the
+decision contour around the C1 ring.
+It also converges in 159 epochs---four times slower than the deeper
+variants---because the loss landscape is flat: only center positions and
+bandwidths carry meaningful gradient signal.
+
+Second, both the one-layer \texttt{(32,)} and two-layer \texttt{(32,16)}
+variants reach the same peak validation F1 of 0.9847, indicating that
+a single hidden layer is sufficient to encode the enclosed-ring topology
+at this center count.
+
+Third, and most practically significant, the one-layer variant
+\emph{generalises better}: its test macro-F1 of 0.9407 exceeds the
+two-layer result of 0.8949, and its train--test F1 gap (+0.021) is
+smaller than the two-layer's (+0.037).
+The two-layer model contains 1,341 parameters versus 829 for the
+one-layer model; the extra capacity allows the deeper network to fit
+the training distribution more closely without improving out-of-sample
+discrimination.
+These results suggest that for this dataset and center count, one
+post-RBF hidden layer is the preferable choice.
+The two-layer configuration is retained in the main results for
+completeness and comparison with the original design.
+
+% ─────────────────────────────────────────────────────────────────────────────
 \section{Discussion}
 \label{sec:discussion}
 
@@ -439,14 +508,19 @@ than false alarms.
 
 This work introduced a biologically-inspired synthetic dataset with a genuinely
 non-circular, anisotropic enclosed-class geometry and significant class
-imbalance, and trained a k-means-seeded RBF network with two additional
-fully-connected layers to classify it.
-The two post-RBF layers are justified by the need to compose local Gaussian
-responses into a non-convex, closed decision boundary---a task that a single
-linear layer cannot perform efficiently.
-The final model achieves 92.5\% test accuracy, ROC-AUC of 0.9934, and
-macro-F1 of 0.8949 with a train--test gap below 4\%, demonstrating that
-the architecture and training procedure generalise effectively.
+imbalance, and trained a k-means-seeded RBF network with a configurable
+post-RBF stack to classify it.
+An architecture ablation over three \texttt{hidden\_dims} settings
+confirms that at least one hidden layer is necessary---the shallow baseline
+reaches only 0.8456 test macro-F1 and converges four times more slowly---
+and that the one-layer variant \texttt{(32,)} achieves the best test
+generalisation (macro-F1 0.9407, ROC-AUC 0.9973, train--test gap +0.021).
+The two-layer default matches the one-layer on validation F1 (0.9847) but
+over-fits slightly more, suggesting the extra capacity is unnecessary for
+this dataset.
+A complexity sweep further shows that validation performance saturates
+at $k{=}10$ RBF centers, confirming the problem's intrinsic representational
+requirement is modest.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{thebibliography}{9}
