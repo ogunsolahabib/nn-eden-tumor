@@ -269,3 +269,105 @@ def complexity_sweep(
     print(f"\nComplexity sweep saved → {path}")
 
     return center_grid, tr_f1s, va_f1s
+
+
+# ── architecture ablation sweep ───────────────────────────────────────────────
+
+# Configs to compare: (label, hidden_dims)
+ARCH_CONFIGS = [
+    ("0-hidden\n(classic RBF)",  ()),
+    ("1-hidden\n(16)",           (16,)),
+    ("1-hidden\n(32)",           (32,)),
+    ("2-hidden\n32→16 (ours)",   (32, 16)),
+    ("2-hidden\n64→32",          (64, 32)),
+]
+
+
+def architecture_sweep(
+    X_train, y_train, X_val, y_val,
+    train_fn,
+    output_dir: str = "aml-final",
+):
+    """
+    Train one model per architecture config (fixed k=20) and compare
+    train vs val macro-F1 and parameter count.  Empirically validates
+    the two-hidden-layer architectural choice.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    results = []
+
+    for label, hidden_dims in ARCH_CONFIGS:
+        tag = label.replace("\n", " ")
+        print(f"\n── Arch sweep: {tag} ──")
+        model, history, _ = train_fn(
+            X_train, y_train, X_val, y_val,
+            hidden_dims=hidden_dims,
+            output_dir=output_dir,
+        )
+        preds_tr, probs_tr = _predict(model, X_train, device)
+        preds_va, probs_va = _predict(model, X_val,   device)
+        tr_f1 = f1_score(y_train, preds_tr, average="macro", zero_division=0)
+        va_f1 = f1_score(y_val,   preds_va, average="macro", zero_division=0)
+        n_p   = model.n_params()
+        results.append((label, hidden_dims, tr_f1, va_f1, n_p))
+
+    _plot_arch_sweep(results, output_dir)
+    _print_arch_table(results)
+    return results
+
+
+def _plot_arch_sweep(results, output_dir):
+    labels  = [r[0] for r in results]
+    tr_f1s  = [r[2] for r in results]
+    va_f1s  = [r[3] for r in results]
+    n_ps    = [r[4] for r in results]
+
+    x = np.arange(len(labels))
+    w = 0.35
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+
+    # F1 grouped bar chart
+    axes[0].bar(x - w/2, tr_f1s, w, label="Train macro-F1", color="#4c72b0")
+    axes[0].bar(x + w/2, va_f1s, w, label="Val macro-F1",   color="#dd8452")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(labels, fontsize=8.5)
+    axes[0].set_ylabel("Macro F1")
+    axes[0].set_title("Architecture ablation — Macro F1")
+    axes[0].set_ylim(0, 1.08)
+    axes[0].legend()
+    axes[0].grid(axis="y", alpha=0.3)
+
+    for i, (tr, va) in enumerate(zip(tr_f1s, va_f1s)):
+        axes[0].text(i - w/2, tr + 0.01, f"{tr:.3f}", ha="center", va="bottom", fontsize=7)
+        axes[0].text(i + w/2, va + 0.01, f"{va:.3f}", ha="center", va="bottom", fontsize=7)
+
+    # Parameter count bar
+    axes[1].bar(x, n_ps, color="#55a868")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(labels, fontsize=8.5)
+    axes[1].set_ylabel("Trainable parameters")
+    axes[1].set_title("Architecture ablation — Parameter count")
+    axes[1].grid(axis="y", alpha=0.3)
+
+    for i, n in enumerate(n_ps):
+        axes[1].text(i, n + max(n_ps) * 0.01, str(n), ha="center", va="bottom", fontsize=8)
+
+    plt.tight_layout()
+    path = os.path.join(output_dir, "fig7_arch_sweep.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"\nArchitecture sweep saved → {path}")
+
+
+def _print_arch_table(results):
+    print("\n── Architecture ablation results ──")
+    print(f"  {'Architecture':<24} {'Params':>7}  {'Train F1':>9}  {'Val F1':>9}  {'Gap':>8}")
+    print(f"  {'-'*62}")
+    for label, _, tr, va, n_p in results:
+        tag = label.replace("\n", " ")
+        gap = tr - va
+        flag = "⚠" if gap > 0.05 else ""
+        print(f"  {tag:<24} {n_p:>7}  {tr:>9.4f}  {va:>9.4f}  {gap:>+8.4f}  {flag}")

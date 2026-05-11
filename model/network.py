@@ -5,46 +5,48 @@ from rbf_layer import RBFLayer
 
 class TumorClassifier(nn.Module):
     """
-    Architecture
-    ------------
-    Layer 1  — RBFLayer (k centers, k-means seeded)
-        Encodes spatial proximity to k cluster centroids.
-        Transforms the non-convex ring geometry into a representable
-        metric space where class membership correlates with proximity patterns.
+    Flexible RBF classifier.
 
-    Layer 2  — Linear(k -> 32) + BatchNorm + ReLU
-        Learns which linear combinations of RBF responses delimit the viable
-        rim.  A single linear layer on top of RBFs (classic RBF network) cannot
-        express the compound "inside outer boundary AND outside inner core"
-        predicate without a very large k; a nonlinear layer compensates with
-        far fewer parameters.
+    hidden_dims controls the post-RBF stack:
+      ()        → RBF → output            (classic shallow RBF network)
+      (32,)     → RBF → Dense32 → output  (1 hidden layer)
+      (32, 16)  → RBF → Dense32 → Dense16 → output  (default, 2 hidden layers)
 
-    Layer 3  — Linear(32 -> 16) + ReLU
-        Captures the directional (hot/cold) asymmetry of the C2 immune ring,
-        which is not radially symmetric and therefore not fully resolved by the
-        radially symmetric RBF activations alone.
-
-    Output   — Linear(16 -> 1)   (raw logit, sigmoid inside BCEWithLogitsLoss)
+    BN + Dropout are applied only after the first hidden layer.
+    All hidden activations use ReLU.
     """
 
-    def __init__(self, n_centers: int = 20, dropout: float = 0.3):
+    def __init__(
+        self,
+        n_centers:   int         = 20,
+        hidden_dims: tuple       = (32, 16),
+        dropout:     float       = 0.3,
+    ):
         super().__init__()
-        self.rbf     = RBFLayer(in_features=2, n_centers=n_centers)
-        self.hidden1 = nn.Linear(n_centers, 32)
-        self.bn1     = nn.BatchNorm1d(32)
-        self.hidden2 = nn.Linear(32, 16)
-        self.out     = nn.Linear(16, 1)
-        self.drop    = nn.Dropout(dropout)
+        self.rbf = RBFLayer(in_features=2, n_centers=n_centers)
+
+        layers = []
+        in_dim = n_centers
+        for i, h in enumerate(hidden_dims):
+            layers.append(nn.Linear(in_dim, h))
+            if i == 0:
+                layers.append(nn.BatchNorm1d(h))
+            layers.append(nn.ReLU())
+            if i == 0 and dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            in_dim = h
+        layers.append(nn.Linear(in_dim, 1))
+
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.rbf(x)
-        x = torch.relu(self.bn1(self.hidden1(x)))
-        x = self.drop(x)
-        x = torch.relu(self.hidden2(x))
-        return self.out(x)   # raw logit
+        return self.net(self.rbf(x))
 
     def freeze_centers(self):
         self.rbf.centers.requires_grad_(False)
 
     def unfreeze_centers(self):
         self.rbf.centers.requires_grad_(True)
+
+    def n_params(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)

@@ -67,6 +67,7 @@ def train(
     y_val:   np.ndarray,
     *,
     n_centers:    int   = 20,
+    hidden_dims:  tuple = (32, 16),
     warmup_epochs: int  = 20,   # centers frozen; rest of network adapts first
     max_epochs:   int   = 300,
     batch_size:   int   = 64,
@@ -84,7 +85,7 @@ def train(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ── model ────────────────────────────────────────────────────────────────
-    model = TumorClassifier(n_centers=n_centers, dropout=dropout).to(device)
+    model = TumorClassifier(n_centers=n_centers, hidden_dims=hidden_dims, dropout=dropout).to(device)
 
     # k-means init (unsupervised — only X, not y)
     print(f"Running k-means (k={n_centers}) on training features …")

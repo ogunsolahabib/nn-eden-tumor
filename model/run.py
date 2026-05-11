@@ -20,7 +20,7 @@ from sklearn.preprocessing import StandardScaler
 sys.path.insert(0, os.path.dirname(__file__))
 
 from train import train
-from evaluate import full_evaluation, complexity_sweep
+from evaluate import full_evaluation, complexity_sweep, architecture_sweep
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "aml-final")
 DATA_PATH  = os.path.join(os.path.dirname(__file__), "..", "data-generation", "tumor_dataset.csv")
@@ -33,7 +33,7 @@ def load_data():
     return X, y
 
 
-def main(run_sweep: bool = False):
+def main(run_sweep: bool = False, run_arch_sweep: bool = False):
     print("=" * 60)
     print("Tumor Microenvironment — RBF Network Classifier")
     print("=" * 60)
@@ -110,6 +110,34 @@ def main(run_sweep: bool = False):
             output_dir=OUTPUT_DIR,
         )
 
+    # ── optional architecture ablation ───────────────────────────────────────
+    if run_arch_sweep:
+        print("\n" + "=" * 60)
+        print("Architecture ablation — varying hidden-layer depth / width")
+        print("=" * 60)
+
+        def train_for_arch(Xtr, ytr, Xv, yv, hidden_dims, output_dir):
+            return train(
+                Xtr, ytr, Xv, yv,
+                n_centers=20,
+                hidden_dims=hidden_dims,
+                warmup_epochs=20,
+                max_epochs=200,
+                batch_size=64,
+                lr=1e-3,
+                weight_decay=1e-4,
+                dropout=0.3,
+                patience=20,
+                seed=42,
+                output_dir=output_dir,
+            )
+
+        architecture_sweep(
+            X_train, y_train, X_val, y_val,
+            train_fn=train_for_arch,
+            output_dir=OUTPUT_DIR,
+        )
+
     print("\nDone. Outputs written to:", os.path.abspath(OUTPUT_DIR))
 
 
@@ -117,5 +145,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--sweep", action="store_true",
                         help="Run complexity sweep over RBF center counts")
+    parser.add_argument("--arch-sweep", action="store_true",
+                        help="Run architecture ablation over hidden-layer configs")
     args = parser.parse_args()
-    main(run_sweep=args.sweep)
+    main(run_sweep=args.sweep, run_arch_sweep=args.arch_sweep)

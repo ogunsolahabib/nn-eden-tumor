@@ -8,19 +8,10 @@
 \usepackage{xcolor}
 \usepackage{booktabs}
 \usepackage{url}
-\usepackage{listings}
+\usepackage{float}
 \usepackage{microtype}
 
 \graphicspath{{aml-final/}}
-
-\lstset{
-  language=Python,
-  basicstyle=\ttfamily\scriptsize,
-  breaklines=true,
-  frame=single,
-  xleftmargin=4pt, xrightmargin=4pt,
-  aboveskip=4pt, belowskip=4pt,
-}
 
 \begin{document}
 
@@ -40,11 +31,11 @@
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{abstract}
-We construct a biologically-inspired synthetic dataset in which samples from
+A biologically-inspired synthetic dataset is constructed in which samples from
 the minority class (C1) form an anisotropic ring enclosed by the majority
 class (C2), deliberately avoiding concentric-circle geometry.
 A radial basis function (RBF) network whose centers are seeded by k-means is
-trained on this dataset.  We justify a three-layer post-RBF architecture,
+trained on this dataset.  I justify a two-layer post-RBF architecture,
 demonstrate that the network achieves a test ROC-AUC of 0.9934 and
 macro-F1 of 0.8949 with negligible train--test gap, and provide a complexity
 sweep showing that validation performance plateaus at $k{=}10$ RBF centers.
@@ -67,14 +58,14 @@ sklearn's \texttt{make\_circles}) provide a minimal version of this
 structure but are radially symmetric and do not stress the representational
 capacity of learned features.
 
-We address this gap by designing a dataset inspired by tumor histopathology.
+This gap is addressed by designing a dataset inspired by tumor histopathology.
 In H\&E-stained tissue sections, a viable tumor rim (C1) separates a
 necrotic core from an outer immune infiltrate (C2).
 The rim is geometrically enclosed by the infiltrate, the two classes are
 imbalanced (1:4), and the boundary is anisotropic due to directional
 blood-vessel growth---none of which is captured by circles.
 
-We train a multi-layer network whose first hidden layer consists of RBF
+I train a multi-layer network whose first hidden layer consists of RBF
 units whose centers are initialized via k-means \cite{moody1989fast}.
 The remaining layers are standard linear units that compose the local
 kernel responses into a global, non-convex decision boundary.
@@ -118,7 +109,7 @@ ring; C2 is asymmetrically distributed around it with higher density on
 the vascularized side.  Sub-pixel jitter ($\sigma{=}0.65$ lattice units)
 is added to both classes to produce continuous coordinates.
 
-\begin{figure}[t]
+\begin{figure}[H]
   \centering
   \includegraphics[width=0.95\columnwidth]{fig1_raw_data}
   \caption{Raw dataset.  C1 (red, $n{=}200$) forms an enclosed anisotropic
@@ -262,7 +253,7 @@ The weighted BCE loss prioritizes C1 recall; the network achieves
 precision of 73.6\%.  The confusion matrix (Fig.~\ref{fig:cm}) shows
 only 1 C1 false negative and 14 C2 false positives.
 
-\begin{figure}[h]
+\begin{figure}[H]
   \centering
   \includegraphics[width=0.78\columnwidth]{fig3_confusion_matrix}
   \caption{Confusion matrix on the 200-sample test set.}
@@ -271,7 +262,7 @@ only 1 C1 false negative and 14 C2 false positives.
 
 \subsection{ROC and Precision-Recall Analysis}
 
-\begin{figure*}[t]
+\begin{figure*}[!t]
   \centering
   \includegraphics[width=0.85\textwidth]{fig6_roc_pr}
   \caption{Left: ROC curves for train and test sets.  Right: Precision--Recall
@@ -289,7 +280,7 @@ high recall—critical for the minority class.
 
 \subsection{Overfitting Analysis}
 
-\begin{figure*}[t]
+\begin{figure*}[!t]
   \centering
   \includegraphics[width=0.85\textwidth]{fig2_learning_curves}
   \caption{Learning curves.  The dashed vertical line marks the epoch at
@@ -327,7 +318,7 @@ panel from worsening.
 
 \subsection{Decision Boundary}
 
-\begin{figure*}[b]
+\begin{figure*}[!t]
   \centering
   \includegraphics[width=0.85\textwidth]{fig4_decision_boundary}
   \caption{Learned decision boundary on train (left) and test (right) sets.
@@ -351,10 +342,10 @@ Table~\ref{tab:overfit}.
 \label{sec:complexity}
 
 To determine the sensitivity of performance to the number of RBF centers,
-we sweep $k \in \{5, 10, 15, 20, 30, 40\}$, training an independent model
+I sweep $k \in \{5, 10, 15, 20, 30, 40\}$, training an independent model
 for each value under identical hyperparameters.
 
-\begin{figure}[t]
+\begin{figure}[H]
   \centering
   \includegraphics[width=0.95\columnwidth]{fig5_complexity_sweep}
   \caption{RBF center count vs.\ macro-F1.  Validation performance
@@ -389,21 +380,69 @@ than for $k{=}5$ or $k{=}40$.  This occurs because Dropout interacts
 non-monotonically with the post-RBF width: with 20 centers, the effective
 output dimension of Layer~1 is wide enough that 30\% dropout masks a
 substantial portion of activations each step, making training noisier
-without harming generalisation.  We retain $k{=}20$ for the final model
+without harming generalisation.  I retain $k{=}20$ for the final model
 because the smoother center coverage produces a more visually
 interpretable decision boundary and provides redundancy against
 center drift during fine-tuning.
 
 % ─────────────────────────────────────────────────────────────────────────────
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Why the Warm-Up Phase Matters}
+The two-phase training schedule protects the k-means initialization from
+early corruption.  At the start of training the linear layers hold random
+weights, so the gradient signal propagated back to the RBF centers is
+essentially noise.  Without freezing, a single epoch is sufficient to move
+the centers several standard deviations away from the k-means positions,
+discarding the unsupervised spatial knowledge before the network has learned
+which basis directions are useful.
+
+The cost is visible in Fig.~\ref{fig:lc}: the loss kink at epoch 20
+shows a brief instability when centers are unfrozen into a partly converged
+loss landscape.  The 20-epoch warm-up is long enough for Layer~1 and Layer~2
+to develop stable gradient directions before the centers are released.
+Shorter warm-ups (e.g., 5 epochs) were found to produce noisier convergence
+and lower peak validation F1, while longer warm-ups offer diminishing returns
+because the centers are already well-placed by k-means.
+
+\subsection{Boundary Asymmetry and Hot/Cold Regime}
+A notable feature of the learned boundary is its asymmetry along the vessel
+axis.  On the ``hot'' (vascularized) side of the tumor, C2 density is high
+and the class boundary is tightly constrained; on the ``cold'' side, C2 is
+sparse and the boundary widens into a lower-confidence region.
+This manifests in the probability heat-map (Fig.~\ref{fig:db}) as a
+shallower gradient on the cold side, where the model assigns intermediate
+probabilities ($0.3$--$0.6$) over a larger spatial extent.
+
+The asymmetry does not hurt the C1 recall (97.5\%) because C1 is defined by
+its \emph{enclosed} position relative to the necrotic core, which is
+radially identifiable, rather than by the absolute C2 density around it.
+The 14 C2 false positives in the confusion matrix are concentrated on the
+cold side, where the boundary is least certain---consistent with this
+geometric interpretation.
+
+\subsection{Operating Point and Threshold Choice}
+The default threshold of $\hat{p}{=}0.5$ was chosen to match the re-weighted
+training objective (effective 1:1 class contribution).  Because the
+weighted BCE with $w^+{=}0.25$ already down-weights C2, the learned
+log-odds at the decision boundary corresponds to equal expected loss, not
+equal prior probability.  Shifting the threshold toward $0.4$ would
+increase C1 precision at the cost of recall; the current setting prioritises
+finding all C1 cells, which is appropriate for the motivating
+histopathology task where missed tumor-rim cells carry higher clinical cost
+than false alarms.
+
+% ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
 \label{sec:conclusion}
 
-We introduced a biologically-inspired synthetic dataset with a genuinely
+This work introduced a biologically-inspired synthetic dataset with a genuinely
 non-circular, anisotropic enclosed-class geometry and significant class
 imbalance, and trained a k-means-seeded RBF network with two additional
 fully-connected layers to classify it.
 The two post-RBF layers are justified by the need to compose local Gaussian
-responses into a non-convex, closed decision boundary—a task that a single
+responses into a non-convex, closed decision boundary---a task that a single
 linear layer cannot perform efficiently.
 The final model achieves 92.5\% test accuracy, ROC-AUC of 0.9934, and
 macro-F1 of 0.8949 with a train--test gap below 4\%, demonstrating that
@@ -443,61 +482,5 @@ S.\ Ioffe and C.\ Szegedy,
 \textit{Proc.\ ICML}, pp.~448--456, 2015.
 
 \end{thebibliography}
-
-% ─────────────────────────────────────────────────────────────────────────────
-\appendices
-\section{Key Code Excerpts}
-
-\subsection{RBF Layer}
-\begin{lstlisting}
-class RBFLayer(nn.Module):
-    def __init__(self, in_features, n_centers):
-        super().__init__()
-        self.centers   = nn.Parameter(torch.empty(n_centers, in_features))
-        self.log_gamma = nn.Parameter(torch.zeros(n_centers))
-
-    def forward(self, x):
-        diff    = x.unsqueeze(1) - self.centers.unsqueeze(0)  # (B,K,D)
-        dist_sq = (diff**2).sum(-1)                           # (B,K)
-        gamma   = torch.exp(self.log_gamma)
-        return torch.exp(-gamma * dist_sq)
-\end{lstlisting}
-
-\subsection{k-Means Center Initialization}
-\begin{lstlisting}
-def init_centers_from_kmeans(rbf_layer, X_train, seed=42):
-    K  = rbf_layer.centers.shape[0]
-    km = KMeans(n_clusters=K, random_state=seed, n_init=15).fit(X_train)
-    centers = km.cluster_centers_
-    D = pairwise_distances(centers)
-    np.fill_diagonal(D, np.inf)
-    sigma      = D.min(axis=1).mean()      # mean nearest-centre distance
-    gamma_init = 1.0 / (2.0 * sigma**2)
-    with torch.no_grad():
-        rbf_layer.centers.copy_(
-            torch.tensor(centers, dtype=torch.float32))
-        rbf_layer.log_gamma.fill_(float(np.log(gamma_init)))
-    return km
-\end{lstlisting}
-
-\subsection{Two-Phase Training Loop (abbreviated)}
-\begin{lstlisting}
-model.freeze_centers()          # Phase 1: linear layers only
-for epoch in range(1, max_epochs+1):
-    if epoch == warmup_epochs + 1:
-        model.unfreeze_centers()    # Phase 2: full fine-tuning
-    tr_loss, tr_f1 = run_epoch(model, train_loader, ...)
-    va_loss, va_f1 = run_epoch(model, val_loader, ...)
-    scheduler.step(va_f1)
-    if va_f1 > best_val_f1:
-        best_val_f1   = va_f1
-        best_weights  = copy.deepcopy(model.state_dict())
-        no_imp = 0
-    else:
-        no_imp += 1
-        if no_imp >= patience:
-            break                   # early stopping
-model.load_state_dict(best_weights)
-\end{lstlisting}
 
 \end{document}
